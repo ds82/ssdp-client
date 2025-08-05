@@ -2,7 +2,7 @@ use crate::{Error, SearchTarget};
 
 use futures_core::stream::Stream;
 use genawaiter::sync::{Co, Gen};
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, option::Option, time::Duration};
 use tokio::net::UdpSocket;
 
 const INSUFFICIENT_BUFFER_MSG: &str = "buffer size too small, udp packets lost";
@@ -36,8 +36,11 @@ impl SearchResponse {
 }
 
 #[cfg(not(windows))]
-async fn get_bind_addr() -> Result<SocketAddr, std::io::Error> {
-    Ok(([0, 0, 0, 0], 0).into())
+async fn get_bind_addr(addr: Option<[u8; 4]>) -> Result<SocketAddr, std::io::Error> {
+    match addr {
+        Some(a) => Ok(([a[0], a[1], a[2], a[3]], 0).into()),
+        None => Ok(([0, 0, 0, 0], 0).into()),
+    }
 }
 
 #[cfg(windows)]
@@ -61,7 +64,16 @@ pub async fn search(
     timeout: Duration,
     mx: usize,
 ) -> Result<impl Stream<Item = Result<SearchResponse, Error>>, Error> {
-    let bind_addr: SocketAddr = get_bind_addr().await?;
+    search_on_addr(search_target, timeout, mx, None).await
+}
+
+pub async fn search_on_addr(
+    search_target: &SearchTarget,
+    timeout: Duration,
+    mx: usize,
+    addr: Option<[u8; 4]>,
+) -> Result<impl Stream<Item = Result<SearchResponse, Error>>, Error> {
+    let bind_addr: SocketAddr = get_bind_addr(addr).await?;
     let broadcast_address: SocketAddr = ([239, 255, 255, 250], 1900).into();
 
     let socket = UdpSocket::bind(&bind_addr).await?;

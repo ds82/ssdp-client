@@ -36,5 +36,5 @@ mod search;
 mod search_target;
 
 pub use error::Error;
-pub use search::{search, SearchResponse};
+pub use search::{search, search_on_addr, SearchResponse};
 pub use search_target::{SearchTarget, URN};
