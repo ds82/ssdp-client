@@ -36,11 +36,11 @@ impl SearchResponse {
 }
 
 #[cfg(not(windows))]
-async fn get_bind_addr(addr: Option<[u8; 4]>) -> Result<SocketAddr, std::io::Error> {
-    match addr {
-        Some(a) => Ok(([a[0], a[1], a[2], a[3]], 0).into()),
-        None => Ok(([0, 0, 0, 0], 0).into()),
-    }
+async fn get_bind_addr(_addr: Option<[u8; 4]>) -> Result<SocketAddr, std::io::Error> {
+    // Always bind to INADDR_ANY so the kernel's routing check doesn't reject the
+    // send_to on macOS when the multicast route points to a different interface.
+    // The outgoing interface is selected via IP_MULTICAST_IF instead.
+    Ok(([0, 0, 0, 0], 0).into())
 }
 
 #[cfg(windows)]
@@ -78,14 +78,27 @@ pub async fn search_on_addr(
 
     let socket = UdpSocket::bind(&bind_addr).await?;
 
+    if let Some(a) = addr {
+        let if_addr = std::net::Ipv4Addr::new(a[0], a[1], a[2], a[3]);
+        match socket2::SockRef::from(&socket).set_multicast_if_v4(&if_addr) {
+            Ok(_) => eprintln!("[dbg] set_multicast_if_v4({}) ok", if_addr),
+            Err(e) => eprintln!("[dbg] set_multicast_if_v4({}) err: {}", if_addr, e),
+        }
+    }
+
     let msg = format!(
         "M-SEARCH * HTTP/1.1\r
 Host:239.255.255.250:1900\r
-Man:\"ssdp:discover\"\r
+Man :\"ssdp:discover\"\r
 ST: {}\r
 MX: {}\r\n\r\n",
         search_target, mx
     );
+    eprintln!("[dbg] bind_addr={:?}, sending to {}", bind_addr, broadcast_address);
+    match socket.send_to(msg.as_bytes(), &broadcast_address).await {
+        Ok(n) => eprintln!("[dbg] send_to ok: {} bytes", n),
+        Err(e) => eprintln!("[dbg] send_to err: {}", e),
+    }
     socket.send_to(msg.as_bytes(), &broadcast_address).await?;
 
     Ok(Gen::new(move |co| socket_stream(socket, timeout, co)))
